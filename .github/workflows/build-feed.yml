@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "OpenWRT version with apk support (25.x or newer, e.g., 25.12.3)"
+        description: "OpenWRT version (e.g., 23.05-SNAPSHOT or 25.12.3)"
         required: true
         type: string
       targets:
@@ -27,12 +27,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20.16.0"
-
       - name: Prepare build inputs
         run: |
           set -euo pipefail
@@ -47,20 +45,15 @@ jobs:
 #            echo "Use GitHub Releases artifacts for OpenWrt $VERSION."
 #            exit 1
 #          fi
-
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-
           if [ -n "${{ inputs.targets }}" ]; then
             echo "TARGETS=${{ inputs.targets }}" >> "$GITHUB_ENV"
           fi
-
           if [ -n "${{ inputs.subtargets }}" ]; then
             echo "SUBTARGETS=${{ inputs.subtargets }}" >> "$GITHUB_ENV"
           fi
-
       - name: Install dependencies
         run: npm install
-
       # Reuse existing matrix generation logic from release workflow.
       - name: Generate job config
         id: generate-config
@@ -90,7 +83,6 @@ jobs:
     steps:
       - name: Checkout AWG source code
         uses: actions/checkout@v4
-
       - name: Setup SDK and feeds
         env:
           AWG_FEED_APK_PRIVATE_KEY: ${{ secrets.AWG_FEED_APK_PRIVATE_KEY }}
@@ -105,13 +97,11 @@ jobs:
           SDK_DIR=$(cd "$SDK_DIR" && pwd)
           WORKSPACE_DIR=$(pwd)
           cd "$SDK_DIR"
-
           # Some official SDK containers are thin wrappers and fetch the SDK
           # contents lazily via setup.sh.
           if [ ! -d scripts ]; then
             ./setup.sh
           fi
-
           # OpenWrt 25.x signs APK repository metadata with EC P-256 PEM keys:
           # private-key.pem/public-key.pem. The older usign key-build files are
           # for opkg feeds and cannot verify packages.adb signatures.
@@ -129,7 +119,6 @@ jobs:
           test -s public-key.pem
           grep -q "BEGIN .*PRIVATE KEY" private-key.pem
           grep -q "BEGIN PUBLIC KEY" public-key.pem
-
           # Register isolated custom AWG feed as a local linked feed.
           AWG_FEED_DIR="$WORKSPACE_DIR/.tmp-awg-feed"
           rm -rf "$AWG_FEED_DIR"
@@ -146,7 +135,6 @@ jobs:
           fi
           cp feeds.conf.default feeds.conf
           echo "src-link awg $AWG_FEED_DIR" >> feeds.conf
-
           # Only base/luci are needed for LuCI dependencies; avoid updating
           # unrelated feeds such as routing/telephony/video on every matrix job.
           ./scripts/feeds update base
@@ -156,16 +144,13 @@ jobs:
           ./scripts/feeds install -p awg kmod-amneziawg
           ./scripts/feeds install -p awg amneziawg-tools
           ./scripts/feeds install -p awg luci-proto-amneziawg
-
           echo "CONFIG_PACKAGE_kmod-amneziawg=m" > .config
           echo "CONFIG_PACKAGE_amneziawg-tools=y" >> .config
           echo "CONFIG_PACKAGE_luci-proto-amneziawg=y" >> .config
           echo "CONFIG_PACKAGE_luci-i18n-amneziawg-ru=y" >> .config
           # Ensure feed metadata/signatures are generated in SDK output.
           echo "CONFIG_SIGNED_PACKAGES=y" >> .config
-
           make defconfig
-
       - name: Build AmneziaWG packages
         run: |
           set -euo pipefail
@@ -178,13 +163,11 @@ jobs:
           cd "$SDK_DIR"
           CANONICAL_AWG_FEED_DIR="$SDK_DIR/bin/packages/${{ matrix.build_env.pkgarch }}/awg"
           mkdir -p "$CANONICAL_AWG_FEED_DIR"
-
           # Build the top-level AWG LuCI package into the isolated feed directory.
           # Its dependency graph produces amneziawg-tools and kmod-amneziawg too;
           # the checks below fail fast if any expected package is missing.
           make V=s PACKAGE_DIR="$CANONICAL_AWG_FEED_DIR" \
             package/feeds/awg/luci-proto-amneziawg/compile
-
           # PACKAGE_DIR is inherited by dependency builds; keep the published feed restricted to AWG packages.
           find "$CANONICAL_AWG_FEED_DIR" -maxdepth 1 -type f -name "*.apk" \
             ! -name "amneziawg-tools*.apk" \
@@ -192,16 +175,13 @@ jobs:
             ! -name "luci-proto-amneziawg*.apk" \
             ! -name "luci-i18n-amneziawg-ru*.apk" \
             -delete
-
           echo "AWG feed package files:"
           find "$CANONICAL_AWG_FEED_DIR" -maxdepth 1 -type f -name "*.apk" -printf "%f\n" | sort
-
           # Ensure all expected AWG packages were produced before indexing/publishing.
           ls "$CANONICAL_AWG_FEED_DIR"/amneziawg-tools*.apk >/dev/null
           ls "$CANONICAL_AWG_FEED_DIR"/kmod-amneziawg*.apk >/dev/null
           ls "$CANONICAL_AWG_FEED_DIR"/luci-proto-amneziawg*.apk >/dev/null
           ls "$CANONICAL_AWG_FEED_DIR"/luci-i18n-amneziawg-ru*.apk >/dev/null
-
           UNEXPECTED_PACKAGES=$(find "$CANONICAL_AWG_FEED_DIR" -maxdepth 1 -type f -name "*.apk" \
             ! -name "amneziawg-tools*.apk" \
             ! -name "kmod-amneziawg*.apk" \
@@ -213,22 +193,16 @@ jobs:
             echo "$UNEXPECTED_PACKAGES"
             exit 1
           fi
-
           # Generate repository metadata/signatures only after the AWG feed directory is clean.
           make package/index V=s PACKAGE_DIR="$CANONICAL_AWG_FEED_DIR"
-
           echo "AWG feed metadata:"
           find "$CANONICAL_AWG_FEED_DIR" -maxdepth 1 -type f -printf "%f\n" | sort
-
           echo "CANONICAL_AWG_FEED_DIR=$CANONICAL_AWG_FEED_DIR" >> "$GITHUB_ENV"
-
           # Validate SDK-generated APK repository metadata in canonical feed.
           test -s "$CANONICAL_AWG_FEED_DIR/packages.adb"
-
       - name: Prepare feed publish directory
         run: |
           set -euo pipefail
-
           SDK_DIR="${OPENWRT_SDK_DIR:-/builder}"
           if [ ! -d "$SDK_DIR" ]; then
             echo "OpenWrt SDK directory not found: $SDK_DIR"
@@ -241,7 +215,6 @@ jobs:
           PKGARCH="${{ matrix.build_env.pkgarch }}"
           FEED_DIR="$GITHUB_WORKSPACE/feed-publish/$VERSION/$TARGET/$SUBTARGET"
           CANONICAL_AWG_FEED_DIR="${CANONICAL_AWG_FEED_DIR:?canonical feed is not resolved}"
-
           mkdir -p "$FEED_DIR"
           cp -a "$CANONICAL_AWG_FEED_DIR"/. "$FEED_DIR"/
           cat > "$FEED_DIR/feed.json" <<EOF
@@ -253,16 +226,13 @@ jobs:
             "feed": "awg"
           }
           EOF
-
           # Publish the public part of the stable APK repository signing key.
           mkdir -p "$GITHUB_WORKSPACE/feed-publish/keys"
           cp -a "$SDK_DIR/public-key.pem" "$GITHUB_WORKSPACE/feed-publish/keys/awg-openwrt-feed.pem"
           test -s "$GITHUB_WORKSPACE/feed-publish/keys/awg-openwrt-feed.pem"
-
       - name: Feed smoke tests
         run: |
           set -euo pipefail
-
           SDK_DIR="${OPENWRT_SDK_DIR:-/builder}"
           if [ ! -d "$SDK_DIR" ]; then
             echo "OpenWrt SDK directory not found: $SDK_DIR"
@@ -270,16 +240,13 @@ jobs:
           fi
           SDK_DIR=$(cd "$SDK_DIR" && pwd)
           FEED_DIR="$GITHUB_WORKSPACE/feed-publish/${{ matrix.build_env.tag }}/${{ matrix.build_env.target }}/${{ matrix.build_env.subtarget }}"
-
           test -d "$FEED_DIR"
           test -s "$GITHUB_WORKSPACE/feed-publish/keys/awg-openwrt-feed.pem"
-
           # Ensure expected packages are present as package files.
           ls "$FEED_DIR"/amneziawg-tools*.apk >/dev/null
           ls "$FEED_DIR"/kmod-amneziawg*.apk >/dev/null
           ls "$FEED_DIR"/luci-proto-amneziawg*.apk >/dev/null
           ls "$FEED_DIR"/luci-i18n-amneziawg-ru*.apk >/dev/null
-
           # APK repository must exist and include every AWG package in adb index.
           test -s "$FEED_DIR/packages.adb"
           APK_BIN="$SDK_DIR/staging_dir/host/bin/apk"
@@ -296,7 +263,6 @@ jobs:
           ! grep -q "busybox" "$ADB_DUMP_FILE"
           ! grep -q "\blibc\b" "$ADB_DUMP_FILE"
           ! grep -q "\bubus\b" "$ADB_DUMP_FILE"
-
       - name: Upload feed artifact
         uses: actions/upload-artifact@v4
         with:
@@ -315,17 +281,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Restore existing GitHub Pages content
         run: |
           set -euo pipefail
-
           mkdir -p gh-pages-content
           if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
             git fetch --depth=1 origin gh-pages
             git --work-tree=gh-pages-content checkout FETCH_HEAD -- .
           fi
-
       - name: Update downloads badge data
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -333,7 +296,6 @@ jobs:
           bash .github/scripts/generate-downloads-badge.sh \
             "$GITHUB_WORKSPACE/gh-pages-content/downloads.json" \
             "$GITHUB_REPOSITORY"
-
       - name: Download all feed artifacts
         uses: actions/download-artifact@v4
         continue-on-error: true
@@ -341,24 +303,19 @@ jobs:
           path: gh-pages-content
           pattern: feed-*
           merge-multiple: true
-
       - name: Check publishable feed content
         run: |
           set -euo pipefail
-
           if [ -z "$(find gh-pages-content -name packages.adb -type f -print -quit)" ]; then
             echo "No successful feed artifacts and no existing gh-pages feed content found."
             exit 1
           fi
-
       - name: Generate GitHub Pages site
         run: |
           set -euo pipefail
-
           bash .github/scripts/generate-feed-pages.sh \
             "$GITHUB_WORKSPACE/gh-pages-content" \
             "https://slava-shchipunov.github.io/awg-openwrt"
-
       - name: Publish to GitHub Pages branch
         # Existing gh-pages content is restored above, then republished as one complete tree.
         uses: peaceiris/actions-gh-pages@v4
