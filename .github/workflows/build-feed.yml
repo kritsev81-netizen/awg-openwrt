@@ -35,16 +35,6 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ inputs.version }}"
-#          MAJOR_VERSION="${VERSION%%.*}"
-#          if ! printf '%s\n' "$MAJOR_VERSION" | grep -Eq '^[0-9]+$'; then
-#            echo "Invalid OpenWrt version: $VERSION"
-#            exit 1
-#          fi
-#          if [ "$MAJOR_VERSION" -lt 25 ]; then
-#            echo "GitHub Pages package feed is supported only for OpenWrt 25.x or newer (apk/packages.adb)."
-#            echo "Use GitHub Releases artifacts for OpenWrt $VERSION."
-#            exit 1
-#          fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           if [ -n "${{ inputs.targets }}" ]; then
             echo "TARGETS=${{ inputs.targets }}" >> "$GITHUB_ENV"
@@ -324,4 +314,3 @@ jobs:
           publish_branch: gh-pages
           publish_dir: gh-pages-content
           enable_jekyll: true
-          
